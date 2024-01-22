@@ -4,6 +4,8 @@ import unittest
 from model_infer import test_model_inference
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
+import torch_dipu
+
 class TestLlama2Infer(unittest.TestCase):
 
     def test_llama2_infer(self):
@@ -12,8 +14,8 @@ class TestLlama2Infer(unittest.TestCase):
                              model_dir="/path/llama2-7b-chat", 
                              model_class=LlamaTpPartModel, 
                              batch_size=20, 
-                             input_len=1024, 
-                             output_len=1024,
+                             input_len=10, 
+                             output_len=20,
                              mode=[])
         return
 

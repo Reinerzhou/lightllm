@@ -98,6 +98,7 @@ class LlamaTransformerLayerInfer(TransformerLayerInferTpl):
     
     def _context_attention_kernel(self, q, k, v, infer_state:LlamaInferStateInfo, layer_weight, out=None)->torch.Tensor:
         o_tensor = torch.empty_like(q) if out is None else out
+        pass
         context_attention_fwd(q.view(-1, self.tp_q_head_num_, self.head_dim_),
                               k.view(-1, self.tp_k_head_num_, self.head_dim_),
                               v.view(-1, self.tp_v_head_num_, self.head_dim_),
@@ -228,6 +229,8 @@ class LlamaTransformerLayerInfer(TransformerLayerInferTpl):
                       infer_state.max_len_in_batch)
         
         o_tensor = torch.empty_like(q) if out is None else out
+        
+        pass
         
         if triton.__version__ == "2.0.0":
             prob = torch.empty_like(att_m_tensor)
