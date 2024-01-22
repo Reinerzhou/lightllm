@@ -9,8 +9,9 @@ class LlamaInferStateInfo(InferStateInfo):
         self.position_cos = None
         self.position_sin = None
         self.other_kv_index = None
+        self.mask = None
     
-    def init_some_extra_state(self, model, input_ids : torch.Tensor):
+    def init_some_extra_state(self, model, input_ids : torch.Tensor, mask : torch.Tensor):
         if self.is_prefill:
             b_seq_len_numpy = self.b_seq_len.cpu().numpy()
             position_ids = torch.from_numpy(np.concatenate([np.arange(0, b_seq_len_numpy[i])
@@ -24,4 +25,5 @@ class LlamaInferStateInfo(InferStateInfo):
             self.position_sin = torch.index_select(model._sin_cached, 0, position_ids).view(self.b_seq_len.shape[0], -1)
             self.other_kv_index = self.req_manager.req_to_token_indexs[self.b_req_idx[0], 0].item()
             # b_loc[0, max_len_in_batch - 1].item()
+        self.mask = mask
         return

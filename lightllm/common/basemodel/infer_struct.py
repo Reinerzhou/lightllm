@@ -29,9 +29,6 @@ class InferStateInfo:
         self.is_splitfuse = False
         self.return_all_prompt_logprobs = False
         self.multimodal_params = None
-    
-        self.mask = None
 
-    def init_some_extra_state(self, model, input_ids : torch.Tensor, mask: torch.Tensor):
-        self.mask = mask
+    def init_some_extra_state(self, model, input_ids : torch.Tensor):
         pass
