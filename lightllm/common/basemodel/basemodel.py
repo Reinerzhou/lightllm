@@ -43,6 +43,7 @@ class TpPartBaseModel:
         self.max_req_num = kvargs.get("max_req_num", 1000)
         self.max_seq_length = kvargs.get("max_seq_length", 1024 * 5)
         self.return_all_prompt_logprobs = kvargs.get("return_all_prompt_logprobs", False)
+        # import pdb; pdb.set_trace()
 
         self._init_config()
         self._verify_must()
@@ -186,6 +187,7 @@ class TpPartBaseModel:
             infer_state.key_buffer = torch.empty((infer_state.total_token_num, self.tp_k_head_num_, self.head_dim_), dtype=torch.float16, device="cuda")
             infer_state.value_buffer = torch.empty((infer_state.total_token_num, self.tp_v_head_num_, self.head_dim_), dtype=torch.float16, device="cuda")
         
+        # import pdb; pdb.set_trace()
         init_req_to_token_indexes(self.req_manager.req_to_token_indexs, b_req_idx, b_seq_len,
                             max_len_in_batch, infer_state.mem_index)
 

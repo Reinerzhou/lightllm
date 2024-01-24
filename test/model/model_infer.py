@@ -4,16 +4,18 @@ import multiprocessing
 
 def test_model_inference(world_size, model_dir, model_class, batch_size, input_len, output_len, mode):
     ans_queue = Queue()
+    max_prompt_size = 32
     model_kvargs = {
         "tp_rank": 0,
         "world_size": world_size,
         "weight_dir": model_dir,
-        "max_total_token_num":batch_size * (input_len + output_len),
+        "max_total_token_num":batch_size * (max_prompt_size + output_len),
         "load_way": "HF",
         "mode": mode,
         "max_req_num": batch_size,
-        "max_seq_length": (input_len + output_len)
+        "max_seq_length": (max_prompt_size + output_len)
     }
+    # import pdb; pdb.set_trace()
 
     tppart_model_infer(model_class, model_kvargs, batch_size, input_len, output_len, ans_queue)
     return
@@ -55,22 +57,28 @@ def tppart_model_infer(model_class, model_kvargs, batch_size, input_len, output_
     import torch.distributed as dist
     dist.barrier()
     torch.cuda.empty_cache()
+    torch.cuda.synchronize()
 
     max_prompt_size = 32
-    max_seq_len = 64
 
     model_part = model_class(model_kvargs)
+    model_part.mem_manager.free_all()
+    model_part.req_manager.free_all()
     
-    total_len = min(max_seq_len, max_prompt_size + output_len)
+    total_len = min(model_kvargs["max_seq_length"], max_prompt_size + output_len)
+
+    tmp_data = np.vstack([np.arange(5, input_len + 5) for _ in range(batch_size)])
+    tmp_data = torch.from_numpy(tmp_data).cuda()
 
     test_data = np.vstack([np.arange(5, total_len + 5) for _ in range(batch_size)])
     test_data = torch.from_numpy(test_data).cuda()
 
+    # print("test_data.shape": test_data.shape)
     left_pad_size_list = []
-    for k, t in enumerate(test_data):
-        left_pad_size = output_len - len(t)
+    for k, t in enumerate(tmp_data):
+        left_pad_size = max_prompt_size - len(t)
         left_pad_size_list.append(left_pad_size)
-        test_data[k, left_pad_size: output_len] = torch.tensor(t).cuda().long()
+        test_data[k, left_pad_size: max_prompt_size] = torch.tensor(t).long()
         if left_pad_size > 0:
             test_data[k, 0: left_pad_size] = torch.full((1, left_pad_size), 0).cuda().long()
 
@@ -91,28 +99,29 @@ def tppart_model_infer(model_class, model_kvargs, batch_size, input_len, output_
 
     for cur_pos in range(start_pos, total_len):
         seqlen = cur_pos - prev_pos
+        # import pdb; pdb.set_trace()
         if seqlen > 1:
             origin_mask_full = torch.zeros((1, 1, seqlen, seqlen), 
-                                           dtype=torch.float16, device="cuda")
+                                           dtype=torch.float32, device="cuda")
             mask_list = []
             for pad_size in left_pad_size_list:
-                right_corner_mask = torch.full((1, 1, seqlen - pad_size, seqlen - pad_size),
+                right_corner_mask = torch.full((seqlen - pad_size, seqlen - pad_size),
                                                 float("-inf"), device="cuda")
-                right_corner_mask = torch.triu(right_corner_mask, diagonal=prev_pos + 1).to(torch.float16)
+                right_corner_mask = torch.triu(right_corner_mask, diagonal=prev_pos + 1).to(torch.float32)
                 final_mask_full = origin_mask_full.clone()
                 left_corner_mask = torch.full((1, 1, seqlen - pad_size, pad_size), 
-                                              float("-inf"), device="cuda").to(torch.float16)
+                                              float("-inf"), device="cuda").to(torch.float32)
                 final_mask_full[:, :, pad_size:, pad_size:] = right_corner_mask
                 final_mask_full[:, :, pad_size:, :pad_size] = left_corner_mask
                 mask_list.append(final_mask_full)
             mask = torch.cat(mask_list, dim=0)
 
             total_token_num = seqlen * batch_size
-
+            # import pdb; pdb.set_trace()
             logics = model_part.forward(batch_size, 
                                         total_token_num, 
                                         seqlen, 
-                                        test_data,
+                                        test_data[:cur_pos],
                                         mask,
                                         b_req_idx,
                                         b_start_loc,
@@ -123,14 +132,14 @@ def tppart_model_infer(model_class, model_kvargs, batch_size, input_len, output_
             predict_ids = torch.argmax(prob_out, dim=1, keepdim=True)
             predict_ids = predict_ids.detach().cpu().numpy()
         else:
-            origin_mask_full = torch.zeros((1, 1, seqlen, cur_pos),
-                                            dtype=torch.float16, device="cuda")
+            origin_mask_full = torch.zeros((seqlen, cur_pos),
+                                            dtype=torch.float32, device="cuda")
             mask_list = []
             for pad_size in left_pad_size_list:
-                left_corner_mask = torch.full((1, 1, seqlen, pad_size), float("-inf"),
-                                                device="cuda").to(torch.float16)
+                left_corner_mask = torch.full((seqlen, pad_size), float("-inf"),
+                                                device="cuda").to(torch.float32)
                 final_mask_full = origin_mask_full.clone()
-                final_mask_full[:, :, :, :pad_size] = left_corner_mask
+                final_mask_full[:, :pad_size] = left_corner_mask
                 mask_list.append(final_mask_full)
             mask = torch.cat(mask_list, dim=0)
 
@@ -144,11 +153,15 @@ def tppart_model_infer(model_class, model_kvargs, batch_size, input_len, output_
             prob_out = torch.softmax(logics, dim=-1)
             predict_ids = torch.argmax(prob_out, dim=1, keepdim=True)
             predict_ids = predict_ids.detach().cpu().numpy()
+        prev_pos = cur_pos
+    print(f"Success: {predict_ids}.")
 
     # warm up
     # test_data = np.vstack([np.arange(5, input_len + 5) for _ in range(batch_size)])
     # test_data = test_data.reshape(-1)
     # test_data = torch.from_numpy(test_data).cuda()
+
+    # mask = test_data
 
     # b_req_idx = model_part.req_manager.alloc(batch_size).int()
     # b_start_loc = torch.zeros(batch_size, dtype=torch.int32, device="cuda")
@@ -162,6 +175,7 @@ def tppart_model_infer(model_class, model_kvargs, batch_size, input_len, output_
     #                             total_token_num, 
     #                             input_len, 
     #                             test_data,
+    #                             mask,
     #                             b_req_idx,
     #                             b_start_loc,
     #                             b_seq_len,
@@ -175,25 +189,25 @@ def tppart_model_infer(model_class, model_kvargs, batch_size, input_len, output_
     #     total_token_num += batch_size
     #     b_seq_len += 1
     #     logics = model_part.forward(batch_size, total_token_num, input_len + i + 1, torch.from_numpy(
-    #         predict_ids).cuda().reshape(-1), b_req_idx, b_start_loc, b_seq_len, is_prefill=False)
+    #         predict_ids).cuda().reshape(-1), mask, b_req_idx, b_start_loc, b_seq_len, is_prefill=False)
     #     prob_out = torch.softmax(logics, dim=-1)
     #     predict_ids = torch.argmax(prob_out, dim=1, keepdim=True)
     #     predict_ids = predict_ids.detach().cpu().numpy()
 
-    model_part.mem_manager.free_all()
-    model_part.req_manager.free_all()
+    # model_part.mem_manager.free_all()
+    # model_part.req_manager.free_all()
     
-    if rank_id == 0:
-        print("can use mem size:", model_part.mem_manager.can_use_mem_size)
-        print("can use req size:", model_part.req_manager.can_use_req_size)
+    # if rank_id == 0:
+    #     print("can use mem size:", model_part.mem_manager.can_use_mem_size)
+    #     print("can use req size:", model_part.req_manager.can_use_req_size)
         
-    b_req_idx = None
-    b_start_loc = None
-    b_seq_len = None
+    # b_req_idx = None
+    # b_start_loc = None
+    # b_seq_len = None
     
-    dist.barrier()
-    import time
-    torch.cuda.synchronize()
+    # dist.barrier()
+    # import time
+    # torch.cuda.synchronize()
     # start_time = time.time()
 
     # prefill_start_time = time.time()

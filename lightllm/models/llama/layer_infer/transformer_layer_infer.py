@@ -116,14 +116,21 @@ class LlamaTransformerLayerInfer(TransformerLayerInferTpl):
     
     def _context_attention_kernel(self, q, k, v, infer_state:LlamaInferStateInfo, layer_weight, out=None)->torch.Tensor:
         o_tensor = torch.empty_like(q) if out is None else out
-        pass
         o_tensor = context_attention_fwd(q.view(-1, self.tp_q_head_num_, self.head_dim_),
                               k.view(-1, self.tp_k_head_num_, self.head_dim_),
                               v.view(-1, self.tp_v_head_num_, self.head_dim_),
                               o_tensor.view(-1, self.tp_q_head_num_, self.head_dim_),
                               infer_state.b_start_loc,
                               infer_state.b_seq_len,
-                              infer_state.max_len_in_batch)
+                              infer_state.max_len_in_batch,
+                              infer_state.mask)
+        # print("***************debug info:*******************")
+        # print(q.shape, k.shape, v.shape)
+        # print("o_tensor.shape:", o_tensor.shape)
+        # print("infer_state.mask.shape:", infer_state.mask.shape)
+        # print("\n")
+        # pass        
+
         return o_tensor
     
     # def _splitfuse_attention_kernel(self, q, infer_state: SplitFuseInferStateInfo, layer_weight, out=None) -> torch.Tensor:
@@ -237,7 +244,7 @@ class LlamaTransformerLayerInfer(TransformerLayerInferTpl):
         
         att_m_tensor = torch.empty((self.tp_q_head_num_, total_token_num), dtype=q.dtype, device="cuda")
 
-        token_att_fwd(q.view(calcu_shape1),
+        t = token_att_fwd(q.view(calcu_shape1),
                       infer_state.mem_manager.key_buffer[self.layer_num_],
                       att_m_tensor,
                       infer_state.req_manager.req_to_token_indexs,
@@ -248,7 +255,15 @@ class LlamaTransformerLayerInfer(TransformerLayerInferTpl):
         
         o_tensor = torch.empty_like(q) if out is None else out
 
-        pass
+        # print("***************debug info:*******************")
+        # print(q.view(calcu_shape1).shape, infer_state.mem_manager.key_buffer[self.layer_num_].shape)
+        # print("o_tensor.shape:", o_tensor.shape)
+        # print(t.shape)
+        # print("att_m_tensor.shape:", att_m_tensor.shape)
+        # print("infer_state.mask.shape:", infer_state.mask.shape)
+        # print("\n")
+        # pass
+        att_m_tensor[-1:, :] = infer_state.mask
         
         # if triton.__version__ == "2.0.0":
         #     prob = torch.empty_like(att_m_tensor)

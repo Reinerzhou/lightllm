@@ -30,5 +30,5 @@ class InferStateInfo:
         self.return_all_prompt_logprobs = False
         self.multimodal_params = None
 
-    def init_some_extra_state(self, model, input_ids : torch.Tensor):
+    def init_some_extra_state(self, model, input_ids : torch.Tensor, mask: torch.Tensor):
         pass
